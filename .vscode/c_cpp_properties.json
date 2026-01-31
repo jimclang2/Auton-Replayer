@@ -1,0 +1,37 @@
+{
+  "configurations": [
+    {
+      "name": "PROS Project",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/firmware",
+        "c:\\Users\\admin\\Documents\\new-robot-project\\include",
+        "c:\\Users\\admin\\Downloads\\autontest-project\\include",
+        "c:\\Users\\admin\\Downloads\\Skills Auton - Latest\\include",
+        "c:\\Users\\IJiae\\The Documents\\Coding\\Main-Drive\\include",
+        "c:\\Users\\admin\\Documents\\Main-Drive\\include",
+        "c:\\Users\\IJiae\\Downloads\\Main-Drive-main\\include",
+        "d:\\The Documents\\Coding\\Drive\\Main-Drive\\include",
+        "c:\\Users\\IJiae\\Downloads\\Main-Drive\\include"
+      ],
+      "defines": [
+        "_DEBUG",
+        "UNICODE",
+        "_UNICODE"
+      ],
+      "compilerPath": "c:\\Users\\IJiae\\AppData\\Roaming\\Code\\User\\globalStorage\\sigbots.pros\\install\\pros-toolchain-windows\\usr\\bin\\arm-none-eabi-g++",
+      "cStandard": "gnu11",
+      "cppStandard": "gnu++20",
+      "intelliSenseMode": "gcc-arm",
+      "browse": {
+        "path": [
+          "c:\\Users\\IJiae\\Downloads\\Main-Drive"
+        ],
+        "limitSymbolsToIncludedHeaders": true,
+        "databaseFilename": ""
+      }
+    }
+  ],
+  "version": 4
+}
