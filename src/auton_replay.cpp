@@ -24,13 +24,78 @@ static bool wasPressed(uint8_t current, uint8_t prev, uint8_t bit) {
     return (current & (1 << bit)) && !(prev & (1 << bit));
 }
 
+bool AutonReplay::isSDCardInserted() const {
+    // Check if SD card is present by attempting to stat the directory
+    FILE* test = fopen("/usd/.", "r");
+    if (test) {
+        fclose(test);
+        return true;
+    }
+    return false;
+}
+
+bool AutonReplay::checkEmergencyStop() {
+    // Check for Left + Right arrow combo as emergency stop
+    // Requires BOTH buttons pressed simultaneously to prevent accidental stops
+    return master.get_digital(pros::E_CONTROLLER_DIGITAL_LEFT) && 
+           master.get_digital(pros::E_CONTROLLER_DIGITAL_RIGHT);
+}
+
+void AutonReplay::displayCountdown(int secondsRemaining) {
+    // Display on brain screen
+    pros::screen::set_pen(pros::c::COLOR_BLACK);
+    pros::screen::fill_rect(180, 80, 300, 160);
+    pros::screen::set_pen(pros::c::COLOR_YELLOW);
+    pros::screen::print(pros::E_TEXT_LARGE, 200, 100, "Starting in");
+    pros::screen::set_pen(pros::c::COLOR_WHITE);
+    pros::screen::print(pros::E_TEXT_LARGE, 230, 130, "%d", secondsRemaining);
+    
+    // Display on controller
+    master.print(0, 0, "Starting in %d...  ", secondsRemaining);
+    master.rumble(".");
+}
+
+void AutonReplay::abortPlayback() {
+    _abortRequested = true;
+}
+
 void AutonReplay::startRecording() {
+    // Check SD card before starting if we plan to save
+    if (!isSDCardInserted()) {
+        master.print(0, 0, "WARNING: No SD Card!");
+        master.rumble("---");
+        pros::delay(1000);
+        master.print(0, 0, "Recording anyway...");
+    }
+    
+    // Countdown before recording starts
+    if (countdownDuration > 0) {
+        int seconds = countdownDuration / 1000;
+        for (int i = seconds; i > 0; i--) {
+            displayCountdown(i);
+            pros::delay(1000);
+        }
+    }
+    
     recording.clear();
-    recordStartTime = pros::millis();
+    
+    // Reserve memory to avoid reallocation during recording (5 minutes at 50Hz)
+    try {
+        recording.reserve(15000);
+    } catch (...) {
+        master.print(0, 0, "MEM RESERVE FAILED!");
+        master.rumble("---");
+    }
+    
+    // Use microseconds for precision timing
+    recordStartTime = pros::micros();
     _isRecording = true;
     
     // Reset IMU heading to 0 at start of recording for consistent reference
     imu.set_heading(0);
+    
+    // Boost task priority during recording for consistent timing
+    pros::Task::current().set_priority(TASK_PRIORITY_MAX - 1);
     
     master.print(0, 0, "RECORDING...       ");
     master.rumble("-");  // Short vibration to confirm
@@ -41,11 +106,18 @@ void AutonReplay::startRecording() {
 void AutonReplay::stopRecording(bool saveToSD) {
     _isRecording = false;
     
+    // Restore normal task priority
+    pros::Task::current().set_priority(TASK_PRIORITY_DEFAULT);
+    
     master.print(0, 0, "STOPPED: %d frames ", recording.size());
     master.rumble(".");  // Confirm vibration
     
     if (saveToSD) {
-        if (this->saveToSD()) {
+        // Check SD card is present before attempting save
+        if (!isSDCardInserted()) {
+            master.print(1, 0, "NO SD CARD!        ");
+            master.rumble("---");
+        } else if (this->saveToSD()) {
             master.print(1, 0, "SAVED TO SD!       ");
         } else {
             master.print(1, 0, "SD SAVE FAILED!    ");
@@ -59,16 +131,34 @@ void AutonReplay::recordFrame() {
     if (!_isRecording) return;
     
     RecordedFrame frame;
-    frame.timestamp = pros::millis() - recordStartTime;
+    // Use microseconds for precise timing
+    frame.timestamp = pros::micros() - recordStartTime;
     frame.leftStick = static_cast<int8_t>(master.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y));
     frame.rightStick = static_cast<int8_t>(master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y));
+    
+    // Record actual motor velocities (captures variable speed control!)
+    // We read the current motor target velocity that was set by the subsystem code
+    frame.intakeVelocity = static_cast<int8_t>(Intake.get_target_velocity() * 127 / 200);  // Convert RPM to -127 to 127
+    frame.outtakeVelocity = static_cast<int8_t>(Outtake.get_target_velocity() * 127 / 200);
+    
     frame.heading = imu.get_heading();  // Record heading for drift correction
     frame.buttons = packButtons();
     
-    recording.push_back(frame);
+    // Safe push_back with error handling
+    try {
+        recording.push_back(frame);
+    } catch (...) {
+        // Memory allocation failed - stop recording
+        master.print(0, 0, "MEMORY FULL!       ");
+        stopRecording(true);
+        return;
+    }
+    
+    // Convert to milliseconds for display
+    uint32_t elapsedMs = frame.timestamp / 1000;
     
     // Blink indicator every 500ms
-    if ((frame.timestamp / 500) % 2 == 0) {
+    if ((elapsedMs / 500) % 2 == 0) {
         pros::screen::set_pen(pros::c::COLOR_RED);
     } else {
         pros::screen::set_pen(pros::c::COLOR_DARK_RED);
@@ -112,25 +202,42 @@ void AutonReplay::playback() {
     }
     
     _isPlaying = true;
+    _abortRequested = false;  // Reset abort flag
     prevButtons = 0;
+    
+    // Reset toggle states for pneumatics (motor velocities are recorded directly now)
+    bool midScoring = false;
+    bool descore = false;
+    bool unloader = false;
     
     // Reset IMU heading to match the recording start
     imu.set_heading(0);
     pros::delay(50);  // Brief delay to let IMU settle
     
-    uint32_t playStartTime = pros::millis();
+    // Boost task priority during playback for consistent timing
+    pros::Task::current().set_priority(TASK_PRIORITY_MAX - 1);
+    
+    // Use microseconds for precision timing
+    uint64_t playStartTime = pros::micros();
     size_t frameIndex = 0;
     
-    master.print(0, 0, "REPLAYING...       ");
+    master.print(0, 0, "REPLAYING (<>=STOP)");
     
     // Draw green indicator
     pros::screen::set_pen(pros::c::COLOR_GREEN);
     pros::screen::fill_circle(460, 20, 15);
     
     while (frameIndex < recording.size()) {
-        uint32_t elapsed = pros::millis() - playStartTime;
+        // Check for emergency stop (Y + A buttons)
+        if (checkEmergencyStop() || _abortRequested) {
+            master.print(0, 0, "PLAYBACK ABORTED!  ");
+            master.rumble("--");
+            break;
+        }
         
-        // Process frames up to current time
+        uint64_t elapsed = pros::micros() - playStartTime;
+        
+        // Process frames up to current time (using microseconds)
         while (frameIndex < recording.size() && recording[frameIndex].timestamp <= elapsed) {
             RecordedFrame& frame = recording[frameIndex];
             
@@ -146,71 +253,25 @@ void AutonReplay::playback() {
             left_motors.move(left);
             right_motors.move(right);
             
+            // Apply recorded motor velocities directly (captures exact speeds!)
+            Intake.move(frame.intakeVelocity);
+            Outtake.move(frame.outtakeVelocity);
+            
             // Handle button presses with edge detection for toggle buttons
             uint8_t currentButtons = frame.buttons;
             
-            // Intake (R1 = forward toggle, R2 = reverse toggle)
-            if (wasPressed(currentButtons, prevButtons, BTN_R1)) {
-                // Toggle intake forward
-                static bool intakeForward = false;
-                intakeForward = !intakeForward;
-                if (intakeForward) {
-                    Intake.move(127);
-                } else {
-                    Intake.move(0);
-                }
-            }
-            if (wasPressed(currentButtons, prevButtons, BTN_R2)) {
-                // Toggle intake reverse
-                static bool intakeReverse = false;
-                intakeReverse = !intakeReverse;
-                if (intakeReverse) {
-                    Intake.move(-127);
-                } else {
-                    Intake.move(0);
-                }
-            }
-            
-            // Outtake (L1 = forward toggle, L2 = reverse toggle)
-            if (wasPressed(currentButtons, prevButtons, BTN_L1)) {
-                static bool outtakeForward = false;
-                outtakeForward = !outtakeForward;
-                if (outtakeForward) {
-                    Outtake.move(127);
-                } else {
-                    Outtake.move(0);
-                }
-            }
-            if (wasPressed(currentButtons, prevButtons, BTN_L2)) {
-                static bool outtakeReverse = false;
-                outtakeReverse = !outtakeReverse;
-                if (outtakeReverse) {
-                    Outtake.move(-127);
-                } else {
-                    Outtake.move(0);
-                }
-            }
-            
-            // Mid-scoring toggle (X)
+            // Mid-scoring toggle (X) - still need to handle pneumatic
             if (wasPressed(currentButtons, prevButtons, BTN_X)) {
-                static bool midScoring = false;
                 midScoring = !midScoring;
                 MidScoring.set_value(midScoring);
-                if (midScoring) {
-                    // Mid-scoring mode: intake reverse, outtake reverse
-                    Intake.move(-127);
-                    Outtake.move(-127);
-                }
             }
             
             // Pneumatics (A = descore, B = unloader)
             if (wasPressed(currentButtons, prevButtons, BTN_A)) {
-                static bool descore = false;
                 descore = !descore;
                 Descore.set_value(descore);
             }
             if (wasPressed(currentButtons, prevButtons, BTN_B)) {
-                static bool unloader = false;
                 unloader = !unloader;
                 Unloader.set_value(unloader);
             }
@@ -219,15 +280,18 @@ void AutonReplay::playback() {
             frameIndex++;
         }
         
+        // Convert to milliseconds for display
+        uint32_t elapsedMs = elapsed / 1000;
+        
         // Blink green indicator
-        if ((elapsed / 500) % 2 == 0) {
+        if ((elapsedMs / 500) % 2 == 0) {
             pros::screen::set_pen(pros::c::COLOR_GREEN);
         } else {
             pros::screen::set_pen(pros::c::COLOR_DARK_GREEN);
         }
         pros::screen::fill_circle(460, 20, 15);
         
-        pros::delay(10);  // 10ms polling for smooth playback
+        pros::delay(5);  // 5ms polling for smoother playback with microsecond timing
     }
     
     // Stop all motors at end
@@ -236,9 +300,15 @@ void AutonReplay::playback() {
     Intake.move(0);
     Outtake.move(0);
     
-    _isPlaying = false;
+    // Restore normal task priority
+    pros::Task::current().set_priority(TASK_PRIORITY_DEFAULT);
     
-    master.print(0, 0, "REPLAY COMPLETE!   ");
+    _isPlaying = false;
+    _abortRequested = false;
+    
+    if (!_abortRequested) {
+        master.print(0, 0, "REPLAY COMPLETE!   ");
+    }
     
     // Clear indicator
     pros::screen::set_pen(pros::c::COLOR_BLACK);
@@ -252,10 +322,16 @@ void AutonReplay::clearRecording() {
 
 uint32_t AutonReplay::getDuration() const {
     if (recording.empty()) return 0;
-    return recording.back().timestamp;
+    // Convert from microseconds to milliseconds
+    return recording.back().timestamp / 1000;
 }
 
 bool AutonReplay::saveToSD() {
+    // Check SD card first
+    if (!isSDCardInserted()) {
+        return false;
+    }
+    
     FILE* file = fopen(filePath.c_str(), "wb");
     if (!file) {
         return false;
@@ -275,6 +351,12 @@ bool AutonReplay::saveToSD() {
 }
 
 bool AutonReplay::loadFromSD() {
+    // Check SD card first
+    if (!isSDCardInserted()) {
+        master.print(0, 0, "NO SD CARD!        ");
+        return false;
+    }
+    
     FILE* file = fopen(filePath.c_str(), "rb");
     if (!file) {
         return false;

@@ -5,16 +5,18 @@
 
 // Single frame of recorded data - captures all driver inputs at a moment in time
 struct RecordedFrame {
-    uint32_t timestamp;     // Time since recording started (ms)
+    uint64_t timestamp;     // Time since recording started (microseconds for precision)
     int8_t leftStick;       // Left joystick Y value (-127 to 127)
     int8_t rightStick;      // Right joystick Y value (-127 to 127)
+    int8_t intakeVelocity;  // Actual intake motor velocity (-127 to 127)
+    int8_t outtakeVelocity; // Actual outtake motor velocity (-127 to 127)
     float heading;          // IMU heading at this frame (for drift correction)
     
     // Button states packed into bitflags for memory efficiency
-    // Bit 0: R1 (intake forward toggle)
-    // Bit 1: R2 (intake reverse toggle)
-    // Bit 2: L1 (outtake forward toggle)
-    // Bit 3: L2 (outtake reverse toggle)
+    // Bit 0: R1 (intake forward toggle) - kept for reference
+    // Bit 1: R2 (intake reverse toggle) - kept for reference
+    // Bit 2: L1 (outtake forward toggle) - kept for reference
+    // Bit 3: L2 (outtake reverse toggle) - kept for reference
     // Bit 4: X (mid-scoring toggle)
     // Bit 5: A (descore toggle)
     // Bit 6: B (unloader toggle)
@@ -34,9 +36,10 @@ constexpr uint8_t BTN_B  = 6;
 class AutonReplay {
 private:
     std::vector<RecordedFrame> recording;
-    uint32_t recordStartTime = 0;
+    uint64_t recordStartTime = 0;  // Microseconds for precision timing
     bool _isRecording = false;
     bool _isPlaying = false;
+    bool _abortRequested = false;  // For emergency stop during playback
     
     // Previous button states for edge detection during playback
     uint8_t prevButtons = 0;
@@ -44,11 +47,20 @@ private:
     // IMU correction settings
     float imuCorrectionGain = 2.0f;  // How aggressively to correct heading drift
     
+    // Countdown before recording starts (milliseconds)
+    uint32_t countdownDuration = 3000;  // 3 second countdown by default
+    
     // File path for SD card storage
     std::string filePath = "/usd/auton_recording.bin";
     
     // Helper to apply IMU heading correction
     void applyHeadingCorrection(int& left, int& right, float targetHeading, float currentHeading);
+    
+    // Helper to display countdown on screen and controller
+    void displayCountdown(int secondsRemaining);
+    
+    // Helper to check for emergency stop button combo (Left + Right arrows)
+    bool checkEmergencyStop();
     
 public:
     // Start recording driver inputs
@@ -86,6 +98,15 @@ public:
     
     // Set IMU correction gain (higher = more aggressive correction)
     void setIMUCorrectionGain(float gain) { imuCorrectionGain = gain; }
+    
+    // Set countdown duration before recording starts (in milliseconds)
+    void setCountdownDuration(uint32_t ms) { countdownDuration = ms; }
+    
+    // Abort playback (call from emergency stop)
+    void abortPlayback();
+    
+    // Check if SD card is present
+    bool isSDCardInserted() const;
     
     // Draw status indicator on brain screen
     void drawStatusIndicator();

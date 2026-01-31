@@ -675,8 +675,8 @@ bin/main.cpp.o: src/main.cpp include/lemlib/api.hpp \
  include/pros/rotation.hpp include/pros/rtos.hpp include/pros/screen.hpp \
  include/pros/screen.h include/pros/vision.hpp include/pros/vision.h \
  include/robot_config.h include/main.h include/autonomous.h \
- include/subsystems/intake.h include/subsystems/outtake.h \
- include/subsystems/pneumatics.h
+ include/auton_replay.h include/subsystems/intake.h \
+ include/subsystems/outtake.h include/subsystems/pneumatics.h
 include/lemlib/api.hpp:
 include/lemlib/pid.hpp:
 include/lemlib/pose.hpp:
@@ -1439,6 +1439,7 @@ include/pros/vision.h:
 include/robot_config.h:
 include/main.h:
 include/autonomous.h:
+include/auton_replay.h:
 include/subsystems/intake.h:
 include/subsystems/outtake.h:
 include/subsystems/pneumatics.h:
