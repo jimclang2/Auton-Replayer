@@ -137,9 +137,9 @@ void AutonReplay::recordFrame() {
     frame.rightStick = static_cast<int8_t>(master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y));
     
     // Record actual motor velocities (captures variable speed control!)
-    // We read the current motor target velocity that was set by the subsystem code
-    frame.intakeVelocity = static_cast<int8_t>(Intake.get_target_velocity() * 127 / 200);  // Convert RPM to -127 to 127
-    frame.outtakeVelocity = static_cast<int8_t>(Outtake.get_target_velocity() * 127 / 200);
+    // Blue cartridge = 600 RPM max, convert to -127 to 127 range
+    frame.intakeVelocity = static_cast<int8_t>(Intake.get_target_velocity() * 127 / 600);
+    frame.outtakeVelocity = static_cast<int8_t>(Outtake.get_target_velocity() * 127 / 600);
     
     frame.heading = imu.get_heading();  // Record heading for drift correction
     frame.buttons = packButtons();
