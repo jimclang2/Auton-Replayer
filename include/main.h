@@ -68,6 +68,9 @@ void competition_initialize(void);
 void opcontrol(void);
 #ifdef __cplusplus
 }
+
+// Auton replay menu function
+void drawReplayMenu(void);
 #endif
 
 #ifdef __cplusplus
