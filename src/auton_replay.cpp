@@ -136,10 +136,10 @@ void AutonReplay::recordFrame() {
     frame.leftStick = static_cast<int8_t>(master.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y));
     frame.rightStick = static_cast<int8_t>(master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y));
     
-    // Record actual motor velocities (captures variable speed control!)
-    // Blue cartridge = 600 RPM max, convert to -127 to 127 range
-    frame.intakeVelocity = static_cast<int8_t>(Intake.get_target_velocity() * 127 / 600);
-    frame.outtakeVelocity = static_cast<int8_t>(Outtake.get_target_velocity() * 127 / 600);
+    // Record actual motor voltage (get_voltage returns millivolts: -12000 to 12000)
+    // Scale to -127 to 127 range to match what move() expects
+    frame.intakePower = static_cast<int8_t>(Intake.get_voltage() * 127 / 12000);
+    frame.outtakePower = static_cast<int8_t>(Outtake.get_voltage() * 127 / 12000);
     
     frame.heading = imu.get_heading();  // Record heading for drift correction
     frame.buttons = packButtons();
@@ -253,9 +253,9 @@ void AutonReplay::playback() {
             left_motors.move(left);
             right_motors.move(right);
             
-            // Apply recorded motor velocities directly (captures exact speeds!)
-            Intake.move(frame.intakeVelocity);
-            Outtake.move(frame.outtakeVelocity);
+            // Apply recorded motor power directly
+            Intake.move(frame.intakePower);
+            Outtake.move(frame.outtakePower);
             
             // Handle button presses with edge detection for toggle buttons
             uint8_t currentButtons = frame.buttons;

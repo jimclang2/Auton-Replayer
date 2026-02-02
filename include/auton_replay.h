@@ -8,8 +8,8 @@ struct RecordedFrame {
     uint64_t timestamp;     // Time since recording started (microseconds for precision)
     int8_t leftStick;       // Left joystick Y value (-127 to 127)
     int8_t rightStick;      // Right joystick Y value (-127 to 127)
-    int8_t intakeVelocity;  // Actual intake motor velocity (-127 to 127)
-    int8_t outtakeVelocity; // Actual outtake motor velocity (-127 to 127)
+    int8_t intakePower;     // Actual intake motor power (-127 to 127, from voltage)
+    int8_t outtakePower;    // Actual outtake motor power (-127 to 127, from voltage)
     float heading;          // IMU heading at this frame (for drift correction)
     
     // Button states packed into bitflags for memory efficiency
